@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=NeoMir
+Name[ru]=NeoMir
+Comment=Educational programming environment for KuMir Robot
+Comment[ru]=Среда учебного программирования NeoMir (КуМир / Исполнитель Робот)
+Type=Application
+Exec=neomir
+Icon=io.github.neomir.app
+Terminal=false
+Categories=GNOME;GTK;Education;Development;ComputerScience;
+Keywords=neomir;kumir;robot;education;programming;кумир;робот;огэ;информатика;
+StartupNotify=true

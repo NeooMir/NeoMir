@@ -35,9 +35,9 @@ if ! flatpak remotes | grep -q "flathub"; then
     flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 fi
 
-echo "==> Проверка наличия GNOME 47 Sdk / Platform..."
+echo "==> Проверка наличия GNOME 50 Sdk / Platform..."
 echo "Если компоненты не установлены, выполните:"
-echo "  flatpak install --user -y flathub org.gnome.Platform//47 org.gnome.Sdk//47 org.freedesktop.Sdk.Extension.rust-stable//24.08"
+echo "  flatpak install --user -y flathub org.gnome.Platform//50 org.gnome.Sdk//50 org.freedesktop.Sdk.Extension.rust-stable//26.08"
 echo ""
 
 # 4. Build with flatpak-builder
