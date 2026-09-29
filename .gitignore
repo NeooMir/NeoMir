@@ -6,4 +6,5 @@
 /_flatpak_build
 /_flatpak_repo
 /dist
+/example-plugin
 *.plug
