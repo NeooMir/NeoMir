@@ -1,0 +1,9 @@
+{
+  "id": "io.github.neomir.plugin.rust_python_controller",
+  "name": "Rust + Python Пульт Робота",
+  "version": "1.0.0",
+  "author": "NeoMir Community",
+  "description": "Расширение на Rust (cdylib C-FFI) с Python-биндингами и графическим окном GTK4/Adw",
+  "enabled": true,
+  "entry": "main.py"
+}

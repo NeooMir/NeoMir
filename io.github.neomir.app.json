@@ -1,0 +1,35 @@
+{
+  "app-id": "io.github.neomir.app",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "47",
+  "sdk": "org.gnome.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-stable"
+  ],
+  "command": "neomir",
+  "finish-args": [
+    "--share=ipc",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--device=dri"
+  ],
+  "build-options": {
+    "append-path": "/usr/lib/sdk/rust-stable/bin",
+    "env": {
+      "CARGO_HOME": "/run/build/neomir/cargo"
+    }
+  },
+  "modules": [
+    {
+      "name": "neomir",
+      "buildsystem": "meson",
+      "sources": [
+        "cargo-sources.json",
+        {
+          "type": "dir",
+          "path": "."
+        }
+      ]
+    }
+  ]
+}

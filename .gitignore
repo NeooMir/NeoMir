@@ -1,0 +1,9 @@
+/target
+/_build
+/build
+/cargo-home
+/.flatpak-builder
+/_flatpak_build
+/_flatpak_repo
+/dist
+*.plug

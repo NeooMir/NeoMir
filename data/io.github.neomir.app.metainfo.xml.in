@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.neomir.app</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <name>NeoMir</name>
+  <name xml:lang="ru">NeoMir</name>
+  <summary>Educational programming environment for KuMir with Robot performer</summary>
+  <summary xml:lang="ru">Среда учебного программирования NeoMir (КуМир / Исполнитель Робот)</summary>
+  <url type="homepage">https://github.com/vptr/neomir</url>
+  <url type="bugtracker">https://github.com/vptr/neomir/issues</url>
+  <url type="vcs-browser">https://github.com/vptr/neomir</url>
+  <developer id="io.github.neomir">
+    <name>NeoMir Contributors</name>
+  </developer>
+  <description>
+    <p>
+      NeoMir is a modern educational programming environment based on the KuMir algorithmic language
+      and the Robot performer, built with Rust, GTK4, and Libadwaita.
+    </p>
+    <p xml:lang="ru">
+      NeoMir — современный аналог среды учебного программирования КуМир и Исполнителя «Робот»,
+      написанный на Rust с использованием GTK4 и Libadwaita.
+    </p>
+  </description>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/vptr/neomir/master/data/screenshot.png</image>
+      <caption>NeoMir IDE with Robot Field and Editor</caption>
+      <caption xml:lang="ru">Среда NeoMir с полем Робота и редактором</caption>
+    </screenshot>
+  </screenshots>
+  <launchable type="desktop-id">io.github.neomir.app.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-09-29">
+      <description>
+        <p>Initial release of NeoMir under GNU GPLv2: Robot performer, KuMir language VM, syntax themes, and Vim mode.</p>
+        <p xml:lang="ru">Первый релиз NeoMir под лицензией GNU GPLv2: исполнитель Робот, интерпретатор языка КуМир, темы оформления и Vim-режим.</p>
+      </description>
+    </release>
+  </releases>
+</component>
