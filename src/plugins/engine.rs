@@ -184,13 +184,34 @@ impl PluginEngine {
 
         let sock_path = IpcServer::socket_path();
 
-        let child = Command::new("python3")
-            .arg(&script_path)
-            .current_dir(&dir)
-            .env("NEOMIR_SOCKET", sock_path.to_string_lossy().to_string())
-            .env("PYTHONPATH", &dir)
-            .spawn()
-            .map_err(|e| format!("Ошибка запуска процесса плагина: {}", e))?;
+        let child = if entry.ends_with(".py") {
+            Command::new("python3")
+                .arg(&script_path)
+                .current_dir(&dir)
+                .env("NEOMIR_SOCKET", sock_path.to_string_lossy().to_string())
+                .env("PYTHONPATH", &dir)
+                .spawn()
+                .map_err(|e| format!("Ошибка запуска процесса плагина (python3): {}", e))?
+        } else {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(metadata) = std::fs::metadata(&script_path) {
+                    let mut perms = metadata.permissions();
+                    let mode = perms.mode();
+                    if mode & 0o111 == 0 {
+                        perms.set_mode(mode | 0o755);
+                        let _ = std::fs::set_permissions(&script_path, perms);
+                    }
+                }
+            }
+
+            Command::new(&script_path)
+                .current_dir(&dir)
+                .env("NEOMIR_SOCKET", sock_path.to_string_lossy().to_string())
+                .spawn()
+                .map_err(|e| format!("Ошибка запуска нативного бинарника плагина: {}", e))?
+        };
 
         plugin.process = Some(child);
         Ok(())

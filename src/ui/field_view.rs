@@ -1,4 +1,4 @@
-use crate::robot::RobotField;
+use crate::robot::{PerformerMode, RobotField};
 use gtk::cairo::Context;
 use gtk::prelude::*;
 use std::cell::RefCell;
@@ -101,91 +101,71 @@ impl RobotFieldView {
     }
 
     fn compute_layout(field: &RobotField, width: f64, height: f64) -> (f64, f64, f64) {
-        let margin_x = 24.0;
-        let margin_y = 24.0;
-        let avail_w = (width - margin_x * 2.0).max(10.0);
-        let avail_h = (height - margin_y * 2.0).max(10.0);
+        let padding = 16.0;
+        let avail_w = (width - padding * 2.0).max(10.0);
+        let avail_h = (height - padding * 2.0).max(10.0);
 
         let cell_w = avail_w / field.width as f64;
         let cell_h = avail_h / field.height as f64;
-        let cell_size = cell_w.min(cell_h).clamp(20.0, 70.0);
+        let cell_size = cell_w.min(cell_h).clamp(16.0, 75.0);
 
         let grid_w = cell_size * field.width as f64;
         let grid_h = cell_size * field.height as f64;
-
-        let offset_x = ((width - grid_w) / 2.0).max(margin_x);
-        let offset_y = ((height - grid_h) / 2.0).max(margin_y);
+        let offset_x = (width - grid_w) / 2.0;
+        let offset_y = (height - grid_h) / 2.0;
 
         (cell_size, offset_x, offset_y)
     }
 
-    fn draw_field(field: &RobotField, cr: &Context, width: f64, height: f64) {
-        // Background
-        cr.set_source_rgb(0.97, 0.98, 0.99);
-        let _ = cr.paint();
+    pub fn draw_field(field: &RobotField, cr: &Context, width: f64, height: f64) {
+        // Background fill
+        cr.set_source_rgb(0.96, 0.96, 0.97);
+        cr.paint().unwrap();
 
         let (cell_size, offset_x, offset_y) = Self::compute_layout(field, width, height);
 
-        // Draw grid coordinates / labels
-        cr.set_font_size(10.0);
-        cr.set_source_rgb(0.5, 0.55, 0.6);
-
-        // Column letters / numbers
-        for c in 0..field.width {
-            let label = format!("{}", c + 1);
-            let x = offset_x + c as f64 * cell_size + cell_size * 0.5 - 4.0;
-            let y = offset_y - 7.0;
-            cr.move_to(x, y);
-            let _ = cr.show_text(&label);
-        }
-
-        // Row numbers
-        for r in 0..field.height {
-            let label = format!("{}", r + 1);
-            let x = offset_x - 16.0;
-            let y = offset_y + r as f64 * cell_size + cell_size * 0.5 + 4.0;
-            cr.move_to(x, y);
-            let _ = cr.show_text(&label);
-        }
-
-        // Draw cells
+        // Draw painted cells
         for r in 0..field.height {
             for c in 0..field.width {
-                let x = offset_x + c as f64 * cell_size;
-                let y = offset_y + r as f64 * cell_size;
-
-                // Cell background
                 if field.painted[r][c] {
-                    // Painted cell: attractive soft mint/cyan
-                    cr.set_source_rgb(0.72, 0.92, 0.78);
+                    let x = offset_x + c as f64 * cell_size;
+                    let y = offset_y + r as f64 * cell_size;
+                    cr.set_source_rgb(0.82, 0.88, 0.95);
                     cr.rectangle(x, y, cell_size, cell_size);
                     let _ = cr.fill();
 
-                    // Hatch pattern
-                    cr.set_source_rgba(0.2, 0.6, 0.35, 0.25);
-                    cr.set_line_width(1.0);
-                    let mut hatch_x = x;
-                    while hatch_x < x + cell_size * 2.0 {
-                        cr.move_to(hatch_x, y);
-                        cr.line_to(hatch_x - cell_size, y + cell_size);
-                        let _ = cr.stroke();
-                        hatch_x += 8.0;
+                    // Pattern dots inside painted cell
+                    cr.set_source_rgb(0.68, 0.76, 0.88);
+                    let step = cell_size / 4.0;
+                    for i in 1..4 {
+                        for j in 1..4 {
+                            cr.arc(x + i as f64 * step, y + j as f64 * step, 1.2, 0.0, std::f64::consts::TAU);
+                            let _ = cr.fill();
+                        }
                     }
-                } else {
-                    cr.set_source_rgb(1.0, 1.0, 1.0);
-                    cr.rectangle(x, y, cell_size, cell_size);
-                    let _ = cr.fill();
                 }
-
-                // Grid border
-                cr.set_source_rgba(0.75, 0.8, 0.85, 0.7);
-                cr.set_line_width(0.75);
-                cr.rectangle(x, y, cell_size, cell_size);
-                let _ = cr.stroke();
             }
         }
 
-        // Draw trace dots
+        // Draw grid lines
+        cr.set_source_rgb(0.78, 0.80, 0.84);
+        cr.set_line_width(1.0);
+
+        for c in 0..=field.width {
+            let x = offset_x + c as f64 * cell_size;
+            cr.move_to(x, offset_y);
+            cr.line_to(x, offset_y + field.height as f64 * cell_size);
+            let _ = cr.stroke();
+        }
+
+        for r in 0..=field.height {
+            let y = offset_y + r as f64 * cell_size;
+            cr.move_to(offset_x, y);
+            cr.line_to(offset_x + field.width as f64 * cell_size, y);
+            let _ = cr.stroke();
+        }
+
+        // Draw trace of visited cells (Robot or Turtle)
         if field.trace.len() > 1 {
             cr.set_source_rgba(0.2, 0.5, 0.9, 0.35);
             for &(tx, ty) in &field.trace {
@@ -193,6 +173,24 @@ impl RobotFieldView {
                 let cy = offset_y + ty as f64 * cell_size + cell_size * 0.5;
                 cr.arc(cx, cy, 3.0, 0.0, std::f64::consts::TAU);
                 let _ = cr.fill();
+            }
+        }
+
+        // Draw Turtle vector lines if any
+        if !field.turtle_lines.is_empty() {
+            cr.set_source_rgba(0.18, 0.76, 0.49, 0.95); // Emerald green trace
+            cr.set_line_width(3.5);
+            cr.set_line_cap(gtk::cairo::LineCap::Round);
+            cr.set_line_join(gtk::cairo::LineJoin::Round);
+
+            for &((x1, y1), (x2, y2)) in &field.turtle_lines {
+                let sx1 = offset_x + x1 * cell_size;
+                let sy1 = offset_y + y1 * cell_size;
+                let sx2 = offset_x + x2 * cell_size;
+                let sy2 = offset_y + y2 * cell_size;
+                cr.move_to(sx1, sy1);
+                cr.line_to(sx2, sy2);
+                let _ = cr.stroke();
             }
         }
 
@@ -236,60 +234,119 @@ impl RobotFieldView {
         cr.rectangle(offset_x, offset_y, grid_w, grid_h);
         let _ = cr.stroke();
 
-        // Draw Robot
+        // Coordinates for current performer
         let rx = offset_x + field.robot_x as f64 * cell_size + cell_size * 0.5;
         let ry = offset_y + field.robot_y as f64 * cell_size + cell_size * 0.5;
-        let robot_radius = cell_size * 0.36;
+        let radius = cell_size * 0.36;
 
-        if field.crashed {
-            // Crashed Robot representation (red warning marker)
-            cr.set_source_rgb(0.9, 0.2, 0.2);
-            cr.arc(rx, ry, robot_radius, 0.0, std::f64::consts::TAU);
-            let _ = cr.fill();
+        if field.performer == PerformerMode::Turtle {
+            // ==========================================
+            // Render Turtle Performer (Черепаха)
+            // ==========================================
+            let rad = field.turtle_angle.to_radians();
 
-            cr.set_source_rgb(1.0, 1.0, 1.0);
-            cr.set_line_width(3.0);
-            let d = robot_radius * 0.55;
-            cr.move_to(rx - d, ry - d);
-            cr.line_to(rx + d, ry + d);
-            cr.move_to(rx + d, ry - d);
-            cr.line_to(rx - d, ry + d);
-            let _ = cr.stroke();
-        } else {
-            // KuMir Robot: Diamond with inner eye & robot antenna
-            // Shadow
+            // Shell shadow
             cr.set_source_rgba(0.0, 0.0, 0.0, 0.18);
-            cr.arc(rx, ry + 2.0, robot_radius * 0.9, 0.0, std::f64::consts::TAU);
+            cr.arc(rx, ry + 2.0, radius * 0.9, 0.0, std::f64::consts::TAU);
             let _ = cr.fill();
 
-            // Diamond body
-            cr.set_source_rgb(0.18, 0.45, 0.85); // Classic deep KuMir blue
-            cr.move_to(rx, ry - robot_radius);
-            cr.line_to(rx + robot_radius, ry);
-            cr.line_to(rx, ry + robot_radius);
-            cr.line_to(rx - robot_radius, ry);
-            cr.close_path();
+            // 4 Flippers (Lappies)
+            cr.set_source_rgb(0.18, 0.62, 0.38);
+            for flipper_angle in [rad + 0.7, rad - 0.7, rad + 2.4, rad - 2.4] {
+                let fx = rx + (radius * 0.85) * flipper_angle.cos();
+                let fy = ry - (radius * 0.85) * flipper_angle.sin();
+                cr.arc(fx, fy, radius * 0.30, 0.0, std::f64::consts::TAU);
+                let _ = cr.fill();
+            }
+
+            // Turtle Shell (Green dome)
+            cr.set_source_rgb(0.15, 0.68, 0.37);
+            cr.arc(rx, ry, radius * 0.80, 0.0, std::f64::consts::TAU);
             let _ = cr.fill();
 
-            // Diamond border
-            cr.set_source_rgb(0.08, 0.25, 0.55);
+            // Shell rim
+            cr.set_source_rgb(0.10, 0.48, 0.26);
             cr.set_line_width(2.0);
-            cr.move_to(rx, ry - robot_radius);
-            cr.line_to(rx + robot_radius, ry);
-            cr.line_to(rx, ry + robot_radius);
-            cr.line_to(rx - robot_radius, ry);
-            cr.close_path();
+            cr.arc(rx, ry, radius * 0.80, 0.0, std::f64::consts::TAU);
             let _ = cr.stroke();
 
-            // Inner eye/circle
-            cr.set_source_rgb(1.0, 1.0, 1.0);
-            cr.arc(rx, ry, robot_radius * 0.38, 0.0, std::f64::consts::TAU);
+            // Turtle Head pointing in direction of movement
+            let head_x = rx + (radius * 0.95) * rad.cos();
+            let head_y = ry - (radius * 0.95) * rad.sin();
+            cr.set_source_rgb(0.20, 0.75, 0.42);
+            cr.arc(head_x, head_y, radius * 0.38, 0.0, std::f64::consts::TAU);
             let _ = cr.fill();
 
-            // Pupil
-            cr.set_source_rgb(0.15, 0.2, 0.3);
-            cr.arc(rx, ry, robot_radius * 0.18, 0.0, std::f64::consts::TAU);
-            let _ = cr.fill();
+            cr.set_source_rgb(0.10, 0.48, 0.26);
+            cr.set_line_width(1.5);
+            cr.arc(head_x, head_y, radius * 0.38, 0.0, std::f64::consts::TAU);
+            let _ = cr.stroke();
+
+            // Pen indicator in center of shell
+            if field.turtle_pen_down {
+                cr.set_source_rgb(0.9, 0.2, 0.2); // Red pen down dot
+                cr.arc(rx, ry, radius * 0.22, 0.0, std::f64::consts::TAU);
+                let _ = cr.fill();
+            } else {
+                cr.set_source_rgb(0.7, 0.7, 0.7); // Gray pen up ring
+                cr.set_line_width(1.8);
+                cr.arc(rx, ry, radius * 0.22, 0.0, std::f64::consts::TAU);
+                let _ = cr.stroke();
+            }
+        } else {
+            // ==========================================
+            // Render Robot Performer (Робот)
+            // ==========================================
+            if field.crashed {
+                // Crashed Robot representation (red warning marker)
+                cr.set_source_rgb(0.9, 0.2, 0.2);
+                cr.arc(rx, ry, radius, 0.0, std::f64::consts::TAU);
+                let _ = cr.fill();
+
+                cr.set_source_rgb(1.0, 1.0, 1.0);
+                cr.set_line_width(3.0);
+                let d = radius * 0.55;
+                cr.move_to(rx - d, ry - d);
+                cr.line_to(rx + d, ry + d);
+                cr.move_to(rx + d, ry - d);
+                cr.line_to(rx - d, ry + d);
+                let _ = cr.stroke();
+            } else {
+                // KuMir Robot: Diamond with inner eye & robot antenna
+                // Shadow
+                cr.set_source_rgba(0.0, 0.0, 0.0, 0.18);
+                cr.arc(rx, ry + 2.0, radius * 0.9, 0.0, std::f64::consts::TAU);
+                let _ = cr.fill();
+
+                // Diamond body
+                cr.set_source_rgb(0.18, 0.45, 0.85); // Classic deep KuMir blue
+                cr.move_to(rx, ry - radius);
+                cr.line_to(rx + radius, ry);
+                cr.line_to(rx, ry + radius);
+                cr.line_to(rx - radius, ry);
+                cr.close_path();
+                let _ = cr.fill();
+
+                // Diamond border
+                cr.set_source_rgb(0.08, 0.25, 0.55);
+                cr.set_line_width(2.0);
+                cr.move_to(rx, ry - radius);
+                cr.line_to(rx + radius, ry);
+                cr.line_to(rx, ry + radius);
+                cr.line_to(rx - radius, ry);
+                cr.close_path();
+                let _ = cr.stroke();
+
+                // Inner eye/circle
+                cr.set_source_rgb(1.0, 1.0, 1.0);
+                cr.arc(rx, ry, radius * 0.38, 0.0, std::f64::consts::TAU);
+                let _ = cr.fill();
+
+                // Pupil
+                cr.set_source_rgb(0.15, 0.2, 0.3);
+                cr.arc(rx, ry, radius * 0.18, 0.0, std::f64::consts::TAU);
+                let _ = cr.fill();
+            }
         }
     }
 }

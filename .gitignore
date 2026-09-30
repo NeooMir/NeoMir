@@ -13,3 +13,7 @@ Cargo.lock
 *.swp
 *~
 .DS_Store
+__pycache__/
+*.py[cod]
+*.plug
+*.so

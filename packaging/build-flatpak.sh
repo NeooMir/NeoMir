@@ -35,22 +35,23 @@ if ! flatpak remotes | grep -q "flathub"; then
     flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 fi
 
-echo "==> Проверка наличия GNOME 47 Sdk / Platform..."
+echo "==> Проверка наличия GNOME 50 Sdk / Platform..."
 echo "Если компоненты не установлены, выполните:"
-echo "  flatpak install --user -y flathub org.gnome.Platform//47 org.gnome.Sdk//47 org.freedesktop.Sdk.Extension.rust-stable//24.08"
+echo "  flatpak install --user -y flathub org.gnome.Platform//50 org.gnome.Sdk//50 org.freedesktop.Sdk.Extension.rust-stable//26.08"
 echo ""
 
 # 4. Build with flatpak-builder
 echo "==> Сборка Flatpak через flatpak-builder..."
 flatpak-builder \
     --user \
+    --disable-rofiles-fuse \
     --force-clean \
     --repo="$FLATPAK_REPO_DIR" \
     "$FLATPAK_BUILD_DIR" \
     "$MANIFEST"
 
 # 5. Create single-file bundle (.flatpak) in dist/
-BUNDLE_FILE="$DIST_DIR/neomir-0.1.0.flatpak"
+BUNDLE_FILE="$DIST_DIR/neomir-1.0.0.flatpak"
 echo "==> Создание автономного Flatpak-бандла: $BUNDLE_FILE..."
 flatpak build-bundle "$FLATPAK_REPO_DIR" "$BUNDLE_FILE" "$APP_ID"
 
@@ -59,9 +60,8 @@ echo "============================================="
 echo " Flatpak успешно собран!"
 echo " Бандл для установки на любую систему:"
 echo "   $BUNDLE_FILE"
-echo ""
-echo " Команда для установки бандла пользователем:"
-echo "   flatpak install --user $BUNDLE_FILE"
-echo " Команда для запуска:"
+echo " Установка:"
+echo "   flatpak install --user -y $BUNDLE_FILE"
+echo " Запуск:"
 echo "   flatpak run $APP_ID"
 echo "============================================="

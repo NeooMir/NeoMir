@@ -1,6 +1,7 @@
-use crate::robot::{Direction, RobotField};
+use crate::robot::{Direction, PerformerMode, RobotField};
 use crate::ui::console_view::ConsoleView;
 use crate::ui::field_view::RobotFieldView;
+use gtk::glib;
 use gtk::prelude::*;
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Write};
@@ -12,20 +13,17 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-pub struct IpcRequest {
-    pub command: String,
-    pub response_tx: mpsc::Sender<String>,
-}
-
 pub struct IpcServer;
+
+struct IpcRequest {
+    command: String,
+    response_tx: Sender<String>,
+}
 
 impl IpcServer {
     pub fn socket_path() -> PathBuf {
-        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-            PathBuf::from(runtime_dir).join("neomir.sock")
-        } else {
-            std::env::temp_dir().join("neomir.sock")
-        }
+        let base = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
+        PathBuf::from(base).join("neomir.sock")
     }
 
     pub fn start(
@@ -129,6 +127,7 @@ impl IpcServer {
         };
 
         match action.as_str() {
+            // Robot Movement
             "move_up" | "up" | "вверх" => {
                 let mut f = field.borrow_mut();
                 match f.move_robot(&Direction::Up) {
@@ -214,14 +213,143 @@ impl IpcServer {
                 let mut f = field.borrow_mut();
                 f.reset_execution();
                 field_view.widget.queue_draw();
-                console.print_info("Python: Робот сброшен в исходное положение");
-                status.set_text("Робот возвращен в исходное положение.");
+                console.print_info("Python: Поле сброшено в исходное положение");
+                status.set_text("Исполнитель возвращен в исходное положение.");
                 format_state(&f, "ok", None)
             }
             "get_state" | "status" => {
                 let f = field.borrow();
                 format_state(&f, "ok", None)
             }
+
+            // ==========================================
+            // Console Interaction
+            // ==========================================
+            "set_console_input" | "console_set_input" => {
+                let text = extract_cmd_val(cmd, "text").unwrap_or_default();
+                console.py_entry.set_text(&text);
+                console.switch_to_python();
+                format!("{{\"status\":\"ok\",\"input\":\"{}\"}}", text.replace('"', "\\\""))
+            }
+            "get_console_input" | "console_get_input" => {
+                let text = console.py_entry.text().to_string();
+                format!("{{\"status\":\"ok\",\"input\":\"{}\"}}", text.replace('"', "\\\""))
+            }
+            "exec_console" | "console_exec" | "run_console" => {
+                if let Some(text) = extract_cmd_val(cmd, "text") {
+                    console.py_entry.set_text(&text);
+                }
+                console.switch_to_python();
+                console.py_entry.emit_activate();
+                "{\"status\":\"ok\"}".to_string()
+            }
+            "console_print" | "print" => {
+                let text = extract_cmd_val(cmd, "text").unwrap_or_default();
+                console.print_output(&text);
+                "{\"status\":\"ok\"}".to_string()
+            }
+            "console_clear" | "clear_console" => {
+                console.clear();
+                "{\"status\":\"ok\"}".to_string()
+            }
+
+            // ==========================================
+            // Performer Switcher (Робот ↔ Черепаха)
+            // ==========================================
+            "get_performer" => {
+                let f = field.borrow();
+                let p = match f.performer {
+                    PerformerMode::Robot => "robot",
+                    PerformerMode::Turtle => "turtle",
+                };
+                format!("{{\"status\":\"ok\",\"performer\":\"{}\"}}", p)
+            }
+            "set_performer" => {
+                let perf_arg = extract_cmd_val(cmd, "performer").unwrap_or_default().to_lowercase();
+                let mut f = field.borrow_mut();
+                if perf_arg == "turtle" || perf_arg == "черепаха" {
+                    f.performer = PerformerMode::Turtle;
+                    status.set_text("Активен Исполнитель: Черепаха");
+                } else {
+                    f.performer = PerformerMode::Robot;
+                    status.set_text("Активен Исполнитель: Робот");
+                }
+                field_view.widget.queue_draw();
+                let p = match f.performer {
+                    PerformerMode::Robot => "robot",
+                    PerformerMode::Turtle => "turtle",
+                };
+                format!("{{\"status\":\"ok\",\"performer\":\"{}\"}}", p)
+            }
+
+            // ==========================================
+            // Turtle Performer Commands
+            // ==========================================
+            "turtle_forward" | "вперед" => {
+                let dist = extract_cmd_f64(cmd, "dist").unwrap_or(1.0);
+                let mut f = field.borrow_mut();
+                f.performer = PerformerMode::Turtle;
+                f.turtle_forward(dist);
+                field_view.widget.queue_draw();
+                let msg = format!("Черепаха: шаг вперед на {}", dist);
+                console.log_action(&msg);
+                status.set_text(&msg);
+                format_state(&f, "ok", None)
+            }
+            "turtle_backward" | "назад" => {
+                let dist = extract_cmd_f64(cmd, "dist").unwrap_or(1.0);
+                let mut f = field.borrow_mut();
+                f.performer = PerformerMode::Turtle;
+                f.turtle_backward(dist);
+                field_view.widget.queue_draw();
+                let msg = format!("Черепаха: шаг назад на {}", dist);
+                console.log_action(&msg);
+                status.set_text(&msg);
+                format_state(&f, "ok", None)
+            }
+            "turtle_turn_left" | "влево_угол" => {
+                let angle = extract_cmd_f64(cmd, "angle").unwrap_or(90.0);
+                let mut f = field.borrow_mut();
+                f.performer = PerformerMode::Turtle;
+                f.turtle_turn_left(angle);
+                field_view.widget.queue_draw();
+                let msg = format!("Черепаха: поворот влево на {}°", angle);
+                console.log_action(&msg);
+                status.set_text(&msg);
+                format_state(&f, "ok", None)
+            }
+            "turtle_turn_right" | "вправо_угол" => {
+                let angle = extract_cmd_f64(cmd, "angle").unwrap_or(90.0);
+                let mut f = field.borrow_mut();
+                f.performer = PerformerMode::Turtle;
+                f.turtle_turn_right(angle);
+                field_view.widget.queue_draw();
+                let msg = format!("Черепаха: поворот вправо на {}°", angle);
+                console.log_action(&msg);
+                status.set_text(&msg);
+                format_state(&f, "ok", None)
+            }
+            "turtle_pen_down" | "опустить_хвост" => {
+                let mut f = field.borrow_mut();
+                f.performer = PerformerMode::Turtle;
+                f.turtle_pen_down();
+                field_view.widget.queue_draw();
+                let msg = "Черепаха: хвост опущен (рисование включено)";
+                console.log_action(msg);
+                status.set_text(msg);
+                format_state(&f, "ok", None)
+            }
+            "turtle_pen_up" | "поднять_хвост" => {
+                let mut f = field.borrow_mut();
+                f.performer = PerformerMode::Turtle;
+                f.turtle_pen_up();
+                field_view.widget.queue_draw();
+                let msg = "Черепаха: хвост поднят (рисование отключено)";
+                console.log_action(msg);
+                status.set_text(msg);
+                format_state(&f, "ok", None)
+            }
+
             other => {
                 format!("{{\"status\":\"error\",\"message\":\"Неизвестная команда: {}\"}}", other)
             }
@@ -244,6 +372,19 @@ fn extract_cmd_val(json: &str, field: &str) -> Option<String> {
     Some(after_colon[1..1 + end_quote].to_string())
 }
 
+fn extract_cmd_f64(json: &str, field: &str) -> Option<f64> {
+    let key = format!("\"{}\"", field);
+    let key_pos = json.find(&key)?;
+    let after_key = &json[key_pos + key.len()..];
+    let colon_pos = after_key.find(':')?;
+    let after_colon = after_key[colon_pos + 1..].trim_start();
+    let num_str: String = after_colon
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+        .collect();
+    num_str.parse::<f64>().ok()
+}
+
 fn format_state(f: &RobotField, status: &str, err_msg: Option<&str>) -> String {
     let error_part = if let Some(m) = err_msg {
         format!(",\"message\":\"{}\"", m.replace('"', "\\\""))
@@ -251,11 +392,19 @@ fn format_state(f: &RobotField, status: &str, err_msg: Option<&str>) -> String {
         "".to_string()
     };
 
+    let perf_str = match f.performer {
+        PerformerMode::Robot => "robot",
+        PerformerMode::Turtle => "turtle",
+    };
+
     format!(
-        "{{\"status\":\"{}\",\"x\":{},\"y\":{},\"is_painted\":{},\"crashed\":{},\"wall_up\":{},\"wall_down\":{},\"wall_left\":{},\"wall_right\":{}{}}}",
+        "{{\"status\":\"{}\",\"performer\":\"{}\",\"x\":{},\"y\":{},\"turtle_angle\":{},\"pen_down\":{},\"is_painted\":{},\"crashed\":{},\"wall_up\":{},\"wall_down\":{},\"wall_left\":{},\"wall_right\":{}{}}}",
         status,
+        perf_str,
         f.robot_x + 1,
         f.robot_y + 1,
+        f.turtle_angle,
+        f.turtle_pen_down,
         f.is_painted(),
         f.crashed,
         f.has_wall(&Direction::Up),

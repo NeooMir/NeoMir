@@ -1,27 +1,28 @@
+// NeoMir - Educational Programming Environment (KuMir language)
+// Main entry point
+
 mod lang;
 mod plugins;
 mod robot;
 mod ui;
 
-use gtk::gio;
-use gtk::prelude::*;
+use crate::ui::AppWindow;
+use adw::prelude::*;
 
 const APP_ID: &str = "io.github.neomir.app";
 
 fn main() -> glib::ExitCode {
-    adw::init().expect("Failed to initialize Libadwaita");
-
     let app = adw::Application::builder()
         .application_id(APP_ID)
-        .flags(gio::ApplicationFlags::FLAGS_NONE)
         .build();
 
-    app.connect_activate(|app| {
-        let app_window = ui::AppWindow::new(app);
-        app_window.window.present();
-    });
-
+    app.connect_activate(build_ui);
     app.run()
+}
+
+fn build_ui(app: &adw::Application) {
+    let app_window = AppWindow::new(app);
+    app_window.window.present();
 }
 
 #[cfg(test)]
@@ -29,8 +30,9 @@ mod tests {
     use crate::lang::compile_source;
     use crate::lang::vm::StepResult;
     use crate::plugins::PluginMetadata;
-    use crate::robot::RobotField;
+    use crate::robot::{PerformerMode, RobotField};
     use crate::ui::keybindings::{KeybindingsConfig, Shortcut};
+    use crate::ui::settings_dialog::AppSettings;
     use gtk::gdk;
 
     #[test]
@@ -64,6 +66,67 @@ mod tests {
         assert!(field.painted[0][1]);
         assert!(field.painted[0][2]);
         assert!(field.painted[0][3]);
+    }
+
+    #[test]
+    fn test_multiple_runs_reexecution() {
+        let code = r#"использовать Робот
+алг
+нач
+    вправо
+    закрасить
+кон
+"#;
+        let mut field = RobotField::new(10, 10);
+
+        // Run 1
+        let mut vm1 = compile_source(code).expect("Compilation must succeed");
+        loop {
+            match vm1.step(&mut field) {
+                StepResult::Finished => break,
+                _ => {}
+            }
+        }
+        assert_eq!(field.robot_x, 1);
+        assert!(field.painted[0][1]);
+
+        // Re-execute: reset field execution and compile fresh VM
+        field.reset_execution();
+        assert_eq!(field.robot_x, 0);
+        assert!(!field.painted[0][1]);
+
+        // Run 2 must succeed identically
+        let mut vm2 = compile_source(code).expect("Compilation must succeed");
+        loop {
+            match vm2.step(&mut field) {
+                StepResult::Finished => break,
+                _ => {}
+            }
+        }
+        assert_eq!(field.robot_x, 1);
+        assert!(field.painted[0][1]);
+    }
+
+    #[test]
+    fn test_turtle_movement_and_pen() {
+        let mut field = RobotField::new(10, 10);
+        field.performer = PerformerMode::Turtle;
+        assert_eq!(field.turtle_angle, 0.0);
+        assert!(field.turtle_pen_down);
+        assert!(field.turtle_lines.is_empty());
+
+        field.turtle_forward(2.0);
+        assert_eq!(field.turtle_lines.len(), 1);
+        assert_eq!(field.robot_x, 2);
+
+        field.turtle_turn_right(90.0);
+        assert_eq!(field.turtle_angle, 270.0);
+
+        field.turtle_pen_up();
+        assert!(!field.turtle_pen_down);
+
+        field.turtle_forward(1.0);
+        assert_eq!(field.turtle_lines.len(), 1); // No new line when pen is up
     }
 
     #[test]
@@ -113,5 +176,30 @@ mod tests {
         assert_eq!(default_cfg.run.to_display_string(), "F5");
         assert_eq!(default_cfg.step.to_display_string(), "F10");
         assert_eq!(default_cfg.reset.to_display_string(), "F8");
+    }
+
+    #[test]
+    fn test_app_settings_persistence() {
+        let default_settings = AppSettings::default();
+        assert_eq!(default_settings.performer, "robot");
+        assert_eq!(default_settings.language, "ru");
+        assert!(!default_settings.vim_mode);
+
+        let json = serde_json::to_string(&default_settings).expect("Serialization must succeed");
+        let loaded: AppSettings = serde_json::from_str(&json).expect("Deserialization must succeed");
+        assert_eq!(loaded.performer, "robot");
+        assert_eq!(loaded.language, "ru");
+        assert_eq!(loaded.theme, default_settings.theme);
+        assert!(!loaded.vim_mode);
+
+        let mut custom = default_settings.clone();
+        custom.performer = "turtle".to_string();
+        custom.language = "en".to_string();
+        custom.vim_mode = true;
+        let json_custom = serde_json::to_string(&custom).unwrap();
+        let loaded_custom: AppSettings = serde_json::from_str(&json_custom).unwrap();
+        assert_eq!(loaded_custom.performer, "turtle");
+        assert_eq!(loaded_custom.language, "en");
+        assert!(loaded_custom.vim_mode);
     }
 }

@@ -1,11 +1,12 @@
 use crate::lang::{compile_source, vm::StepResult, vm::VirtualMachine};
 use crate::plugins::ipc::IpcServer;
-use crate::robot::RobotField;
+use crate::robot::{PerformerMode, RobotField};
 use crate::ui::console_view::ConsoleView;
 use crate::ui::editor_view::EditorView;
 use crate::ui::field_view::RobotFieldView;
 use crate::ui::keybindings::KeybindingsConfig;
-use crate::ui::settings_dialog::SettingsDialog;
+use crate::ui::settings_dialog::{AppSettings, SettingsDialog};
+use crate::ui::theme::ThemeId;
 use adw::prelude::*;
 use gtk::glib;
 use std::cell::RefCell;
@@ -17,6 +18,13 @@ pub struct AppWindow {
 }
 
 impl AppWindow {
+    fn set_btn_content(btn: &gtk::Button, icon: &str, label: &str) {
+        let content = adw::ButtonContent::new();
+        content.set_icon_name(icon);
+        content.set_label(label);
+        btn.set_child(Some(&content));
+    }
+
     pub fn new(app: &adw::Application) -> Self {
         let window = adw::ApplicationWindow::builder()
             .application(app)
@@ -30,14 +38,35 @@ impl AppWindow {
         let field_view = Rc::new(RobotFieldView::new(field.clone()));
         let console_view = Rc::new(ConsoleView::new());
 
-        editor_view.buffer.set_text("использовать Робот\nалг\nнач\n    \nкон\n");
-
         let vm: Rc<RefCell<Option<VirtualMachine>>> = Rc::new(RefCell::new(None));
         let is_running = Rc::new(RefCell::new(false));
         let keybindings = Rc::new(RefCell::new(KeybindingsConfig::load()));
+        let app_settings = Rc::new(RefCell::new(AppSettings::load()));
+
+        // Apply saved performer
+        let initial_performer = if app_settings.borrow().performer == "turtle" {
+            PerformerMode::Turtle
+        } else {
+            PerformerMode::Robot
+        };
+        field.borrow_mut().performer = initial_performer;
+
+        // Apply saved theme
+        let saved_theme = app_settings.borrow().theme.clone();
+        if let Some(t) = ThemeId::all().iter().find(|t| t.name() == saved_theme) {
+            editor_view.apply_theme(*t);
+        }
+
+        // Apply saved Vim mode
+        editor_view.vim.set_enabled(app_settings.borrow().vim_mode);
 
         // Status Label & IPC Server
-        let status_label = gtk::Label::new(Some("Готов к работе"));
+        let initial_status_text = if initial_performer == PerformerMode::Turtle {
+            "Активен исполнитель: Черепаха"
+        } else {
+            "Готов к работе"
+        };
+        let status_label = gtk::Label::new(Some(initial_status_text));
         status_label.add_css_class("dim-label");
 
         IpcServer::start(
@@ -83,7 +112,7 @@ impl AppWindow {
                     cfg.step.to_display_string()
                 )));
                 b_reset.set_tooltip_text(Some(&format!(
-                    "Сбросить робота в исходное состояние ({})",
+                    "Сбросить поле в исходное состояние ({})",
                     cfg.reset.to_display_string()
                 )));
                 b_load.set_tooltip_text(Some(&format!(
@@ -98,7 +127,34 @@ impl AppWindow {
         };
         update_tooltips();
 
-        // Hamburger Menu (3 тире) Popover
+        // Title widget
+        let initial_subtitle = if initial_performer == PerformerMode::Turtle {
+            "Исполнитель: Черепаха | Угол: 0° | Хвост опущен".to_string()
+        } else {
+            format!("Исполнитель: Робот | Поле: {}×{}", field.borrow().width, field.borrow().height)
+        };
+        let title_widget = adw::WindowTitle::new("NeoMir", &initial_subtitle);
+
+        // Central Performer synchronization closure (updates title & status, NO EMOJIS)
+        let sync_performer_ui = {
+            let f = field.clone();
+            let fv = field_view.clone();
+            let tw = title_widget.clone();
+            let stat = status_label.clone();
+            Rc::new(move || {
+                let f_borrow = f.borrow();
+                if f_borrow.performer == PerformerMode::Turtle {
+                    tw.set_subtitle("Исполнитель: Черепаха | Угол: 0° | Хвост опущен");
+                    stat.set_text("Активен исполнитель: Черепаха");
+                } else {
+                    tw.set_subtitle(&format!("Исполнитель: Робот | Поле: {}×{}", f_borrow.width, f_borrow.height));
+                    stat.set_text("Активен исполнитель: Робот");
+                }
+                fv.widget.queue_draw();
+            })
+        };
+
+        // Hamburger Menu (3 тире) Popover - ONLY Settings, Extensions, Python, About
         let menu_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
         menu_box.set_margin_top(6);
         menu_box.set_margin_bottom(6);
@@ -114,6 +170,11 @@ impl AppWindow {
         Self::set_btn_content(&btn_menu_extensions, "application-x-addon-symbolic", "Расширения");
         btn_menu_extensions.add_css_class("flat");
         menu_box.append(&btn_menu_extensions);
+
+        let btn_menu_python = gtk::Button::new();
+        Self::set_btn_content(&btn_menu_python, "utilities-terminal-symbolic", "Консоль Python");
+        btn_menu_python.add_css_class("flat");
+        menu_box.append(&btn_menu_python);
 
         let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
         menu_box.append(&sep);
@@ -137,10 +198,14 @@ impl AppWindow {
             let ev = editor_view.clone();
             let kb = keybindings.clone();
             let ut = update_tooltips.clone();
+            let fld = field.clone();
+            let fv = field_view.clone();
+            let sync = sync_performer_ui.clone();
+            let st = app_settings.clone();
             let pop = menu_popover.clone();
             btn_menu_settings.connect_clicked(move |_| {
                 pop.popdown();
-                SettingsDialog::show(&win, &ev, &kb, ut.clone());
+                SettingsDialog::show(&win, &ev, &kb, ut.clone(), &fld, &fv, sync.clone(), &st);
             });
         }
         {
@@ -148,10 +213,22 @@ impl AppWindow {
             let ev = editor_view.clone();
             let kb = keybindings.clone();
             let ut = update_tooltips.clone();
+            let fld = field.clone();
+            let fv = field_view.clone();
+            let sync = sync_performer_ui.clone();
+            let st = app_settings.clone();
             let pop = menu_popover.clone();
             btn_menu_extensions.connect_clicked(move |_| {
                 pop.popdown();
-                SettingsDialog::show_extensions(&win, &ev, &kb, ut.clone());
+                SettingsDialog::show_extensions(&win, &ev, &kb, ut.clone(), &fld, &fv, sync.clone(), &st);
+            });
+        }
+        {
+            let con = console_view.clone();
+            let pop = menu_popover.clone();
+            btn_menu_python.connect_clicked(move |_| {
+                pop.popdown();
+                con.switch_to_python();
             });
         }
         {
@@ -163,11 +240,11 @@ impl AppWindow {
                     .application_name("NeoMir")
                     .developer_name("Разработчики NeoMir")
                     .version(env!("CARGO_PKG_VERSION"))
-                    .comments("Современная среда учебного программирования на алгоритмическом языке КуМир с Исполнителем «Робот».\nРазработано на Rust, GTK4 и Libadwaita.")
+                    .comments("Современная среда учебного программирования на алгоритмическом языке КуМир с Исполнителями «Робот» и «Черепаха».\nРазработано на Rust, GTK4 и Libadwaita.")
                     .website("https://github.com/neoomir/neomir")
                     .issue_url("https://github.com/neoomir/neomir/issues")
                     .license_type(gtk::License::Gpl20)
-                    .application_icon("io.neoomir.neomir.app")
+                    .application_icon("io.github.neomir.app")
                     .copyright("© 2026 NeoMir")
                     .build();
                 about.present(Some(&win));
@@ -176,7 +253,6 @@ impl AppWindow {
 
         // HeaderBar assembly
         let header = adw::HeaderBar::new();
-        let title_widget = adw::WindowTitle::new("NeoMir", "Исполнитель: Робот | Поле: 10×10");
         header.set_title_widget(Some(&title_widget));
 
         let left_controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -298,7 +374,7 @@ impl AppWindow {
             });
         }
 
-        // Field Tools Bar
+        // Field Tools Bar (Clear walls, Clear paint, Sizes - NO PERFORMER BUTTON)
         let field_tools_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         field_tools_box.set_margin_start(8);
         field_tools_box.set_margin_end(8);
@@ -331,16 +407,83 @@ impl AppWindow {
         btn_size_20.add_css_class("flat");
         field_tools_box.append(&btn_size_20);
 
-        Self::bind_field_tools(
-            &field,
-            &field_view,
-            &title_widget,
-            &btn_clear_walls,
-            &btn_clear_paint,
-            &btn_size_10,
-            &btn_size_15,
-            &btn_size_20,
-        );
+        {
+            let f = field.clone();
+            let fv = field_view.clone();
+            btn_clear_walls.connect_clicked(move |_| {
+                let mut field_mut = f.borrow_mut();
+                for row in field_mut.h_walls.iter_mut() {
+                    row.fill(false);
+                }
+                for row in field_mut.v_walls.iter_mut() {
+                    row.fill(false);
+                }
+                fv.widget.queue_draw();
+            });
+        }
+
+        {
+            let f = field.clone();
+            let fv = field_view.clone();
+            btn_clear_paint.connect_clicked(move |_| {
+                let mut field_mut = f.borrow_mut();
+                for row in field_mut.painted.iter_mut() {
+                    row.fill(false);
+                }
+                for row in field_mut.initial_painted.iter_mut() {
+                    row.fill(false);
+                }
+                fv.widget.queue_draw();
+            });
+        }
+
+        {
+            let f = field.clone();
+            let fv = field_view.clone();
+            let tw = title_widget.clone();
+            btn_size_10.connect_clicked(move |_| {
+                f.borrow_mut().resize(10, 10);
+                let f_b = f.borrow();
+                if f_b.performer == PerformerMode::Turtle {
+                    tw.set_subtitle("Исполнитель: Черепаха | Угол: 0° | Хвост опущен");
+                } else {
+                    tw.set_subtitle("Исполнитель: Робот | Поле: 10×10");
+                }
+                fv.widget.queue_draw();
+            });
+        }
+
+        {
+            let f = field.clone();
+            let fv = field_view.clone();
+            let tw = title_widget.clone();
+            btn_size_15.connect_clicked(move |_| {
+                f.borrow_mut().resize(15, 15);
+                let f_b = f.borrow();
+                if f_b.performer == PerformerMode::Turtle {
+                    tw.set_subtitle("Исполнитель: Черепаха | Угол: 0° | Хвост опущен");
+                } else {
+                    tw.set_subtitle("Исполнитель: Робот | Поле: 15×15");
+                }
+                fv.widget.queue_draw();
+            });
+        }
+
+        {
+            let f = field.clone();
+            let fv = field_view.clone();
+            let tw = title_widget.clone();
+            btn_size_20.connect_clicked(move |_| {
+                f.borrow_mut().resize(20, 20);
+                let f_b = f.borrow();
+                if f_b.performer == PerformerMode::Turtle {
+                    tw.set_subtitle("Исполнитель: Черепаха | Угол: 0° | Хвост опущен");
+                } else {
+                    tw.set_subtitle("Исполнитель: Робот | Поле: 20×20");
+                }
+                fv.widget.queue_draw();
+            });
+        }
 
         // Right side: Field + Field Tools + Console View
         let right_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -413,7 +556,7 @@ impl AppWindow {
                 fv_clone.widget.queue_draw();
                 ev_clone.highlight_line(None);
                 stat_clone.set_text("Готов к работе");
-                con_clone.print_info("Робот сброшен в исходную позицию.");
+                con_clone.print_info("Поле сброшено в исходную позицию.");
             })
         };
 
@@ -534,85 +677,6 @@ impl AppWindow {
         window.add_controller(key_controller);
 
         Self { window }
-    }
-
-    fn set_btn_content(btn: &gtk::Button, icon: &str, label: &str) {
-        let content = adw::ButtonContent::new();
-        content.set_icon_name(icon);
-        content.set_label(label);
-        btn.set_child(Some(&content));
-    }
-
-    fn bind_field_tools(
-        field: &Rc<RefCell<RobotField>>,
-        field_view: &Rc<RobotFieldView>,
-        title_widget: &adw::WindowTitle,
-        btn_clear_walls: &gtk::Button,
-        btn_clear_paint: &gtk::Button,
-        btn_size_10: &gtk::Button,
-        btn_size_15: &gtk::Button,
-        btn_size_20: &gtk::Button,
-    ) {
-        {
-            let f = field.clone();
-            let fv = field_view.clone();
-            btn_clear_walls.connect_clicked(move |_| {
-                let mut field_mut = f.borrow_mut();
-                for row in field_mut.h_walls.iter_mut() {
-                    row.fill(false);
-                }
-                for row in field_mut.v_walls.iter_mut() {
-                    row.fill(false);
-                }
-                fv.widget.queue_draw();
-            });
-        }
-
-        {
-            let f = field.clone();
-            let fv = field_view.clone();
-            btn_clear_paint.connect_clicked(move |_| {
-                let mut field_mut = f.borrow_mut();
-                for row in field_mut.painted.iter_mut() {
-                    row.fill(false);
-                }
-                for row in field_mut.initial_painted.iter_mut() {
-                    row.fill(false);
-                }
-                fv.widget.queue_draw();
-            });
-        }
-
-        {
-            let f = field.clone();
-            let fv = field_view.clone();
-            let tw = title_widget.clone();
-            btn_size_10.connect_clicked(move |_| {
-                *f.borrow_mut() = RobotField::new(10, 10);
-                tw.set_subtitle("Исполнитель: Робот | Поле: 10×10");
-                fv.widget.queue_draw();
-            });
-        }
-        {
-            let f = field.clone();
-            let fv = field_view.clone();
-            let tw = title_widget.clone();
-            btn_size_15.connect_clicked(move |_| {
-                *f.borrow_mut() = RobotField::new(15, 15);
-                tw.set_subtitle("Исполнитель: Робот | Поле: 15×15");
-                fv.widget.queue_draw();
-            });
-        }
-        {
-            let f = field.clone();
-            let fv = field_view.clone();
-            let tw = title_widget.clone();
-            btn_size_20.connect_clicked(move |_| {
-                *f.borrow_mut() = RobotField::new(20, 20);
-                tw.set_subtitle("Исполнитель: Робот | Поле: 20×20");
-                fv.widget.queue_draw();
-            });
-        }
     }
 
     fn do_step(

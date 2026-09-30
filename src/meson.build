@@ -6,11 +6,17 @@ sources = files(
   'lang/ast.rs',
   'lang/parser.rs',
   'lang/vm.rs',
+  'plugins/mod.rs',
+  'plugins/engine.rs',
+  'plugins/ipc.rs',
   'ui/mod.rs',
   'ui/app_window.rs',
   'ui/editor_view.rs',
   'ui/field_view.rs',
   'ui/console_view.rs',
+  'ui/keybindings.rs',
+  'ui/settings_dialog.rs',
+  'ui/theme.rs',
 )
 
 cargo_script = meson.project_source_root() / 'build-aux' / 'cargo.sh'
