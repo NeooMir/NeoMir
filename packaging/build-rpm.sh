@@ -20,7 +20,7 @@ mkdir -p "$DIST_DIR"
 # Создание spec-файла
 cat << EOF > "$RPM_TOPDIR/SPECS/neomir.spec"
 Name:           neomir
-Version:        0.1.0
+Version:        1.1
 Release:        1%{?dist}
 Summary:        Среда учебного программирования NeoMir (КуМир / Робот)
 License:        GPL-2.0-or-later

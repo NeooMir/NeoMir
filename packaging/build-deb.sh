@@ -8,7 +8,7 @@ DIST_DIR="$ROOT_DIR/dist"
 
 WORK_DIR="/tmp/neomir-deb-build"
 PACKAGE_NAME="neomir"
-VERSION="0.1.0"
+VERSION="1.1"
 ARCH="amd64"
 
 echo "==> Сборка релизного бинарника NeoMir..."

@@ -51,7 +51,7 @@ flatpak-builder \
     "$MANIFEST"
 
 # 5. Create single-file bundle (.flatpak) in dist/
-BUNDLE_FILE="$DIST_DIR/neomir-1.0.0.flatpak"
+BUNDLE_FILE="$DIST_DIR/neomir-1.1.0.flatpak"
 echo "==> Создание автономного Flatpak-бандла: $BUNDLE_FILE..."
 flatpak build-bundle "$FLATPAK_REPO_DIR" "$BUNDLE_FILE" "$APP_ID"
 
