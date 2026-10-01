@@ -81,6 +81,27 @@ impl RobotField {
         self.turtle_lines.clear();
     }
 
+    pub fn step_back(&mut self) -> bool {
+        if self.trace.len() > 1 {
+            self.trace.pop();
+            let (px, py) = *self.trace.last().unwrap();
+            self.robot_x = px;
+            self.robot_y = py;
+            self.crashed = false;
+            self.crash_message = None;
+            if self.performer == PerformerMode::Turtle && !self.turtle_lines.is_empty() {
+                self.turtle_lines.pop();
+            }
+            true
+        } else {
+            self.robot_x = self.start_x;
+            self.robot_y = self.start_y;
+            self.crashed = false;
+            self.crash_message = None;
+            false
+        }
+    }
+
     pub fn set_start_pos(&mut self, x: usize, y: usize) {
         if x < self.width && y < self.height {
             self.start_x = x;

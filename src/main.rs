@@ -202,4 +202,83 @@ mod tests {
         assert_eq!(loaded_custom.language, "en");
         assert!(loaded_custom.vim_mode);
     }
+
+    #[test]
+    fn test_english_kumir_program_execution() {
+        let code = "alg test_en\nbegin\n  right\n  down\n  paint\nend\n";
+        let mut vm = compile_source(code).expect("Should compile English KuMir");
+        let mut field = RobotField::new(10, 10);
+        loop {
+            match vm.step(&mut field) {
+                StepResult::Finished => break,
+                StepResult::Error { message, .. } => panic!("Execution error: {}", message),
+                _ => {}
+            }
+        }
+        assert_eq!(field.robot_x, 1);
+        assert_eq!(field.robot_y, 1);
+        assert!(field.painted[1][1]);
+    }
+
+    #[test]
+    fn test_i18n_dictionary() {
+        use crate::ui::i18n::Language;
+        let en = Language::En;
+        let ru = Language::Ru;
+        assert_eq!(en.tr("run"), "Run");
+        assert_eq!(ru.tr("run"), "Выполнить");
+        assert_eq!(en.tr("settings_title"), "NeoMir Settings");
+        assert_eq!(ru.tr("settings_title"), "Настройки NeoMir");
+        assert_eq!(en.tr("active_performer"), "Active Performer");
+        assert_eq!(ru.tr("active_performer"), "Активный исполнитель");
+        assert!(en.is_en());
+        assert!(!ru.is_en());
+        assert_eq!(Language::from_code("en"), Language::En);
+        assert_eq!(Language::from_code("ru"), Language::Ru);
+    }
+
+    #[test]
+    fn test_robot_step_back() {
+        let mut field = RobotField::new(10, 10);
+        assert_eq!(field.robot_x, 0);
+        assert_eq!(field.robot_y, 0);
+
+        // Move right then down
+        let _ = field.move_robot(&crate::robot::Direction::Right);
+        assert_eq!(field.robot_x, 1);
+        assert_eq!(field.robot_y, 0);
+
+        let _ = field.move_robot(&crate::robot::Direction::Down);
+        assert_eq!(field.robot_x, 1);
+        assert_eq!(field.robot_y, 1);
+
+        // Step back should return to (1, 0)
+        let stepped = field.step_back();
+        assert!(stepped);
+        assert_eq!(field.robot_x, 1);
+        assert_eq!(field.robot_y, 0);
+
+        // Step back again should return to (0, 0)
+        let stepped2 = field.step_back();
+        assert!(stepped2);
+        assert_eq!(field.robot_x, 0);
+        assert_eq!(field.robot_y, 0);
+
+        // Third step back at origin should return false and keep at start
+        let stepped3 = field.step_back();
+        assert!(!stepped3);
+        assert_eq!(field.robot_x, 0);
+        assert_eq!(field.robot_y, 0);
+    }
+
+    #[test]
+    fn test_syntax_mode_toggle() {
+        use crate::ui::editor_view::SyntaxMode;
+        assert_eq!(SyntaxMode::from_str("kumir"), SyntaxMode::Kumir);
+        assert_eq!(SyntaxMode::from_str("python"), SyntaxMode::Python);
+        assert_eq!(SyntaxMode::from_str("py"), SyntaxMode::Python);
+        assert_eq!(SyntaxMode::from_str("unknown"), SyntaxMode::Kumir);
+        assert_eq!(SyntaxMode::Kumir.as_str(), "kumir");
+        assert_eq!(SyntaxMode::Python.as_str(), "python");
+    }
 }

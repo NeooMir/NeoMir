@@ -2,6 +2,7 @@ use crate::plugins::PluginManager;
 use crate::robot::{PerformerMode, RobotField};
 use crate::ui::editor_view::EditorView;
 use crate::ui::field_view::RobotFieldView;
+use crate::ui::i18n::Language;
 use crate::ui::keybindings::{prompt_shortcut_recording, KeybindingsConfig};
 use crate::ui::theme::ThemeId;
 use adw::prelude::*;
@@ -12,12 +13,18 @@ use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+fn default_syntax_str() -> String {
+    "kumir".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub theme: String,
     pub language: String,
     pub performer: String,
     pub vim_mode: bool,
+    #[serde(default = "default_syntax_str")]
+    pub syntax_mode: String,
 }
 
 impl Default for AppSettings {
@@ -27,6 +34,7 @@ impl Default for AppSettings {
             language: "ru".to_string(),
             performer: "robot".to_string(),
             vim_mode: false,
+            syntax_mode: "kumir".to_string(),
         }
     }
 }
@@ -74,6 +82,7 @@ impl SettingsDialog {
         field_view: &Rc<RobotFieldView>,
         on_performer_changed: Rc<dyn Fn()>,
         app_settings: &Rc<RefCell<AppSettings>>,
+        on_language_changed: Rc<dyn Fn()>,
     ) {
         Self::show_internal(
             parent,
@@ -84,6 +93,7 @@ impl SettingsDialog {
             field_view,
             on_performer_changed,
             app_settings,
+            on_language_changed,
             false,
         );
     }
@@ -97,6 +107,7 @@ impl SettingsDialog {
         field_view: &Rc<RobotFieldView>,
         on_performer_changed: Rc<dyn Fn()>,
         app_settings: &Rc<RefCell<AppSettings>>,
+        on_language_changed: Rc<dyn Fn()>,
     ) {
         Self::show_internal(
             parent,
@@ -107,6 +118,7 @@ impl SettingsDialog {
             field_view,
             on_performer_changed,
             app_settings,
+            on_language_changed,
             true,
         );
     }
@@ -120,10 +132,13 @@ impl SettingsDialog {
         field_view: &Rc<RobotFieldView>,
         on_performer_changed: Rc<dyn Fn()>,
         app_settings: &Rc<RefCell<AppSettings>>,
+        on_language_changed: Rc<dyn Fn()>,
         open_extensions: bool,
     ) {
+        let lang = Language::from_code(&app_settings.borrow().language);
+
         let dialog = adw::PreferencesDialog::builder()
-            .title("Настройки NeoMir")
+            .title(lang.tr("settings_title"))
             .build();
 
         let win_parent = parent.clone();
@@ -132,17 +147,17 @@ impl SettingsDialog {
         // Tab 1: General (Themes, Language, Performer, Editor, Vim)
         // ==========================================
         let page_general = adw::PreferencesPage::new();
-        page_general.set_title("Основные");
+        page_general.set_title(lang.tr("tab_general"));
         page_general.set_icon_name(Some("preferences-system-symbolic"));
 
         // Group 1: Appearance & themes (Ptyxis themes)
         let theme_group = adw::PreferencesGroup::new();
-        theme_group.set_title("Внешний вид и темы Ptyxis");
-        theme_group.set_description(Some("Выбор цветовой схемы Ptyxis для редактора кода и интерфейса"));
+        theme_group.set_title(lang.tr("grp_appearance"));
+        theme_group.set_description(Some(lang.tr("desc_appearance")));
 
         let theme_combo = adw::ComboRow::new();
-        theme_combo.set_title("Тема оформления");
-        theme_combo.set_subtitle("Цвета подсветки синтаксиса и фона");
+        theme_combo.set_title(lang.tr("theme_title"));
+        theme_combo.set_subtitle(lang.tr("theme_sub"));
 
         let themes = ThemeId::all();
         let theme_names: Vec<&str> = themes.iter().map(|t| t.name()).collect();
@@ -171,57 +186,70 @@ impl SettingsDialog {
 
         // Group 2: Language & Localization
         let lang_group = adw::PreferencesGroup::new();
-        lang_group.set_title("Язык и локализация");
-        lang_group.set_description(Some("Выбор языка интерфейса приложения"));
+        lang_group.set_title(lang.tr("grp_language"));
+        lang_group.set_description(Some(lang.tr("desc_language")));
 
         let lang_combo = adw::ComboRow::new();
-        lang_combo.set_title("Язык интерфейса");
-        let languages = ["Русский (Russian)", "English (Английский)"];
+        lang_combo.set_title(lang.tr("lang_title"));
+        let languages = ["Русский (Russian)", "English"];
         let lang_list = gtk::StringList::new(&languages);
         lang_combo.set_model(Some(&lang_list));
 
         if app_settings.borrow().language == "en" {
             lang_combo.set_selected(1);
-            lang_combo.set_subtitle("Current language: English");
+            lang_combo.set_subtitle(lang.tr("cur_lang_en"));
         } else {
             lang_combo.set_selected(0);
-            lang_combo.set_subtitle("Текущий язык: Русский");
+            lang_combo.set_subtitle(lang.tr("cur_lang_ru"));
         }
 
         let parent_alert = parent.clone();
         let lang_combo_clone = lang_combo.clone();
         let s_lang = app_settings.clone();
+        let on_lang_change_cb = on_language_changed.clone();
+
         lang_combo.connect_selected_notify(move |combo| {
             let idx = combo.selected();
-            if idx == 0 {
-                lang_combo_clone.set_subtitle("Текущий язык: Русский");
-                s_lang.borrow_mut().language = "ru".to_string();
-            } else {
-                lang_combo_clone.set_subtitle("Current language: English");
-                s_lang.borrow_mut().language = "en".to_string();
-                let alert = adw::AlertDialog::builder()
-                    .heading("Язык интерфейса")
-                    .body("Выбран язык: English. Интерфейс адаптирован.")
-                    .build();
-                alert.add_response("ok", "OK");
-                alert.choose(&parent_alert, Option::<&gio::Cancellable>::None, |_| {});
+            let new_lang = if idx == 0 { Language::Ru } else { Language::En };
+            let lang_code = new_lang.code().to_string();
+
+            if s_lang.borrow().language == lang_code {
+                return;
             }
+
+            s_lang.borrow_mut().language = lang_code;
             let _ = s_lang.borrow().save();
+
+            if new_lang.is_en() {
+                lang_combo_clone.set_subtitle("Current language: English");
+            } else {
+                lang_combo_clone.set_subtitle("Текущий язык: Русский");
+            }
+
+            // Update main window UI components dynamically
+            on_lang_change_cb();
+
+            let alert = adw::AlertDialog::builder()
+                .heading(new_lang.tr("lang_changed_title"))
+                .body(new_lang.tr("lang_changed_body"))
+                .build();
+            alert.add_response("ok", "OK");
+            alert.choose(&parent_alert, Option::<&gio::Cancellable>::None, |_| {});
         });
 
         lang_group.add(&lang_combo);
         page_general.add(&lang_group);
 
-        // Group 3: Performer selection (Робот <-> Черепаха, NO EMOJIS)
+        // Group 3: Performer selection (Robot <-> Turtle)
         let performer_group = adw::PreferencesGroup::new();
-        performer_group.set_title("Исполнитель алгоритма");
-        performer_group.set_description(Some("Выбор активного исполнителя: клетчатое поле Робота или векторная графика Черепахи"));
+        performer_group.set_title(lang.tr("grp_performer"));
+        performer_group.set_description(Some(lang.tr("desc_performer")));
 
         let performer_combo = adw::ComboRow::new();
-        performer_combo.set_title("Активный исполнитель");
+        performer_combo.set_title(lang.tr("active_performer"));
         let performer_options = [
-            "Робот (клетчатое поле, закрашивание клеток, стены)",
-            "Черепаха (векторное рисование, перо/хвост, углы поворота)",
+            lang.tr("perf_opt_robot"),
+            lang.tr("perf_opt_turtle"),
         ];
         let performer_list = gtk::StringList::new(&performer_options);
         performer_combo.set_model(Some(&performer_list));
@@ -229,10 +257,10 @@ impl SettingsDialog {
         let cur_performer = field.borrow().performer;
         if cur_performer == PerformerMode::Turtle {
             performer_combo.set_selected(1);
-            performer_combo.set_subtitle("Текущий исполнитель: Черепаха");
+            performer_combo.set_subtitle(lang.tr("cur_perf_turtle"));
         } else {
             performer_combo.set_selected(0);
-            performer_combo.set_subtitle("Текущий исполнитель: Робот");
+            performer_combo.set_subtitle(lang.tr("cur_perf_robot"));
         }
 
         let f_perf = field.clone();
@@ -240,15 +268,17 @@ impl SettingsDialog {
         let on_change = on_performer_changed.clone();
         let perf_combo_clone = performer_combo.clone();
         let s_perf = app_settings.clone();
+        let cur_lang_for_perf = lang;
+
         performer_combo.connect_selected_notify(move |combo| {
             let idx = combo.selected();
             if idx == 1 {
                 f_perf.borrow_mut().performer = PerformerMode::Turtle;
-                perf_combo_clone.set_subtitle("Текущий исполнитель: Черепаха");
+                perf_combo_clone.set_subtitle(cur_lang_for_perf.tr("cur_perf_turtle"));
                 s_perf.borrow_mut().performer = "turtle".to_string();
             } else {
                 f_perf.borrow_mut().performer = PerformerMode::Robot;
-                perf_combo_clone.set_subtitle("Текущий исполнитель: Робот");
+                perf_combo_clone.set_subtitle(cur_lang_for_perf.tr("cur_perf_robot"));
                 s_perf.borrow_mut().performer = "robot".to_string();
             }
             let _ = s_perf.borrow().save();
@@ -261,12 +291,12 @@ impl SettingsDialog {
 
         // Group 4: Editor & Vim mode
         let editor_group = adw::PreferencesGroup::new();
-        editor_group.set_title("Редактор");
-        editor_group.set_description(Some("Параметры ввода текста и режимы управления"));
+        editor_group.set_title(lang.tr("grp_editor"));
+        editor_group.set_description(Some(lang.tr("desc_editor")));
 
         let vim_switch = adw::SwitchRow::new();
-        vim_switch.set_title("Режим Vim (модальное редактирование)");
-        vim_switch.set_subtitle("Клавиши h, j, k, l, i, w, b, x, u, dd для профессионалов");
+        vim_switch.set_title(lang.tr("vim_title"));
+        vim_switch.set_subtitle(lang.tr("vim_sub"));
         vim_switch.set_active(editor_view.vim.is_enabled());
 
         let ed_vim = editor_view.clone();
@@ -274,6 +304,7 @@ impl SettingsDialog {
         let switch_clone = vim_switch.clone();
         let reverting = Rc::new(Cell::new(false));
         let s_vim = app_settings.clone();
+        let vim_lang = lang;
 
         vim_switch.connect_active_notify(move |switch| {
             if reverting.get() {
@@ -282,12 +313,12 @@ impl SettingsDialog {
             let is_active = switch.is_active();
             if is_active && !ed_vim.vim.is_enabled() {
                 let alert = adw::AlertDialog::builder()
-                    .heading("Включить режим Vim?")
-                    .body("Режим Vim предназначен для опытных пользователей, знакомых с модальным управлением (NORMAL / INSERT / VISUAL).\n\nНажмите i для ввода текста, Esc для возврата в командный режим.")
+                    .heading(vim_lang.tr("vim_alert_title"))
+                    .body(vim_lang.tr("vim_alert_body"))
                     .build();
 
-                alert.add_response("cancel", "Отмена");
-                alert.add_response("enable", "Включить");
+                alert.add_response("cancel", vim_lang.tr("cancel"));
+                alert.add_response("enable", vim_lang.tr("enable"));
                 alert.set_response_appearance("enable", adw::ResponseAppearance::Suggested);
 
                 let ed_inner = ed_vim.clone();
@@ -325,20 +356,21 @@ impl SettingsDialog {
         // Tab 2: Keyboard shortcuts
         // ==========================================
         let page_shortcuts = adw::PreferencesPage::new();
-        page_shortcuts.set_title("Горячие клавиши");
+        page_shortcuts.set_title(lang.tr("tab_shortcuts"));
         page_shortcuts.set_icon_name(Some("input-keyboard-symbolic"));
 
         let shortcuts_group = adw::PreferencesGroup::new();
-        shortcuts_group.set_title("Управление средой");
-        shortcuts_group.set_description(Some("Нажмите кнопку комбинации для назначения новой клавиши"));
+        shortcuts_group.set_title(lang.tr("grp_shortcuts"));
+        shortcuts_group.set_description(Some(lang.tr("desc_shortcuts")));
 
         let kb_cfg = keybindings.clone();
         let on_change_kb = on_keybindings_changed.clone();
         let win_sc = parent.clone();
+        let is_en = lang.is_en();
 
         // 1. Run (F5)
         let row_run = adw::ActionRow::new();
-        row_run.set_title("Выполнить программу");
+        row_run.set_title(lang.tr("sc_run"));
         let btn_run = gtk::Button::with_label(&kb_cfg.borrow().run.to_display_string());
         btn_run.add_css_class("flat");
         btn_run.set_valign(gtk::Align::Center);
@@ -347,12 +379,13 @@ impl SettingsDialog {
             let on_ch = on_change_kb.clone();
             let btn_clone = btn_run.clone();
             let win = win_sc.clone();
+            let title = lang.tr("run").to_string();
             btn_run.connect_clicked(move |_| {
                 let kb_inner = kb_clone.clone();
                 let on_ch_inner = on_ch.clone();
                 let btn = btn_clone.clone();
                 let current_sc = kb_inner.borrow().run.clone();
-                prompt_shortcut_recording(&win, "Выполнить", &current_sc, move |sc| {
+                prompt_shortcut_recording(&win, &title, &current_sc, is_en, move |sc| {
                     btn.set_label(&sc.to_display_string());
                     kb_inner.borrow_mut().run = sc;
                     let _ = kb_inner.borrow().save();
@@ -365,7 +398,7 @@ impl SettingsDialog {
 
         // 2. Step (F10)
         let row_step = adw::ActionRow::new();
-        row_step.set_title("Шаг программы");
+        row_step.set_title(lang.tr("sc_step"));
         let btn_step = gtk::Button::with_label(&kb_cfg.borrow().step.to_display_string());
         btn_step.add_css_class("flat");
         btn_step.set_valign(gtk::Align::Center);
@@ -374,12 +407,13 @@ impl SettingsDialog {
             let on_ch = on_change_kb.clone();
             let btn_clone = btn_step.clone();
             let win = win_sc.clone();
+            let title = lang.tr("step").to_string();
             btn_step.connect_clicked(move |_| {
                 let kb_inner = kb_clone.clone();
                 let on_ch_inner = on_ch.clone();
                 let btn = btn_clone.clone();
                 let current_sc = kb_inner.borrow().step.clone();
-                prompt_shortcut_recording(&win, "Шаг", &current_sc, move |sc| {
+                prompt_shortcut_recording(&win, &title, &current_sc, is_en, move |sc| {
                     btn.set_label(&sc.to_display_string());
                     kb_inner.borrow_mut().step = sc;
                     let _ = kb_inner.borrow().save();
@@ -392,7 +426,7 @@ impl SettingsDialog {
 
         // 3. Reset (F8)
         let row_reset = adw::ActionRow::new();
-        row_reset.set_title("Сброс поля и выполнения");
+        row_reset.set_title(lang.tr("sc_reset"));
         let btn_reset = gtk::Button::with_label(&kb_cfg.borrow().reset.to_display_string());
         btn_reset.add_css_class("flat");
         btn_reset.set_valign(gtk::Align::Center);
@@ -401,12 +435,13 @@ impl SettingsDialog {
             let on_ch = on_change_kb.clone();
             let btn_clone = btn_reset.clone();
             let win = win_sc.clone();
+            let title = lang.tr("reset").to_string();
             btn_reset.connect_clicked(move |_| {
                 let kb_inner = kb_clone.clone();
                 let on_ch_inner = on_ch.clone();
                 let btn = btn_clone.clone();
                 let current_sc = kb_inner.borrow().reset.clone();
-                prompt_shortcut_recording(&win, "Сброс", &current_sc, move |sc| {
+                prompt_shortcut_recording(&win, &title, &current_sc, is_en, move |sc| {
                     btn.set_label(&sc.to_display_string());
                     kb_inner.borrow_mut().reset = sc;
                     let _ = kb_inner.borrow().save();
@@ -419,7 +454,7 @@ impl SettingsDialog {
 
         // 4. Save (Ctrl+S)
         let row_save = adw::ActionRow::new();
-        row_save.set_title("Сохранить файл");
+        row_save.set_title(lang.tr("sc_save"));
         let btn_save = gtk::Button::with_label(&kb_cfg.borrow().save.to_display_string());
         btn_save.add_css_class("flat");
         btn_save.set_valign(gtk::Align::Center);
@@ -428,12 +463,13 @@ impl SettingsDialog {
             let on_ch = on_change_kb.clone();
             let btn_clone = btn_save.clone();
             let win = win_sc.clone();
+            let title = lang.tr("save").to_string();
             btn_save.connect_clicked(move |_| {
                 let kb_inner = kb_clone.clone();
                 let on_ch_inner = on_ch.clone();
                 let btn = btn_clone.clone();
                 let current_sc = kb_inner.borrow().save.clone();
-                prompt_shortcut_recording(&win, "Сохранить", &current_sc, move |sc| {
+                prompt_shortcut_recording(&win, &title, &current_sc, is_en, move |sc| {
                     btn.set_label(&sc.to_display_string());
                     kb_inner.borrow_mut().save = sc;
                     let _ = kb_inner.borrow().save();
@@ -445,7 +481,7 @@ impl SettingsDialog {
         shortcuts_group.add(&row_save);
 
         // Reset to defaults
-        let btn_defaults = gtk::Button::with_label("Сбросить по умолчанию");
+        let btn_defaults = gtk::Button::with_label(lang.tr("btn_defaults"));
         btn_defaults.add_css_class("destructive-action");
         btn_defaults.set_halign(gtk::Align::Center);
         btn_defaults.set_margin_top(12);
@@ -477,18 +513,18 @@ impl SettingsDialog {
         // Tab 3: Extensions / Plugins (.plug support)
         // ==========================================
         let page_plugins = adw::PreferencesPage::new();
-        page_plugins.set_title("Расширения");
+        page_plugins.set_title(lang.tr("tab_extensions"));
         page_plugins.set_icon_name(Some("application-x-addon-symbolic"));
 
         let install_group = adw::PreferencesGroup::new();
-        install_group.set_title("Установка пакетов");
-        install_group.set_description(Some("Поддерживаются самостоятельные плагины NeoMir в формате пакетов .plug"));
+        install_group.set_title(lang.tr("grp_pkg_install"));
+        install_group.set_description(Some(lang.tr("desc_pkg_install")));
 
         let install_row = adw::ActionRow::new();
-        install_row.set_title("Установить расширение из файла");
-        install_row.set_subtitle("Выберите пакет .plug для установки");
+        install_row.set_title(lang.tr("install_from_file"));
+        install_row.set_subtitle(lang.tr("choose_plug_sub"));
 
-        let btn_choose_plug = gtk::Button::with_label("Выбрать .plug...");
+        let btn_choose_plug = gtk::Button::with_label(lang.tr("btn_choose_plug"));
         btn_choose_plug.add_css_class("suggested-action");
         btn_choose_plug.set_valign(gtk::Align::Center);
         install_row.add_suffix(&btn_choose_plug);
@@ -497,11 +533,12 @@ impl SettingsDialog {
         page_plugins.add(&install_group);
 
         let list_group = adw::PreferencesGroup::new();
-        list_group.set_title("Установленные расширения");
+        list_group.set_title(lang.tr("grp_installed_ext"));
 
         // Helper to refresh plugin list
         let plugins_state = Rc::new(RefCell::new(Vec::new()));
         let list_group_rc = Rc::new(list_group.clone());
+        let plug_lang = lang;
 
         let refresh_list = {
             let win = parent.clone();
@@ -520,8 +557,8 @@ impl SettingsDialog {
 
                 if list.is_empty() {
                     let empty_row = adw::ActionRow::new();
-                    empty_row.set_title("Нет установленных расширений");
-                    empty_row.set_subtitle("Установите пакет .plug через кнопку выше");
+                    empty_row.set_title(plug_lang.tr("no_installed_ext"));
+                    empty_row.set_subtitle(plug_lang.tr("no_ext_sub"));
                     lg.add(&empty_row);
                     return;
                 }
@@ -546,8 +583,8 @@ impl SettingsDialog {
                     sw.connect_state_set(move |_, state| {
                         if let Err(e) = PluginManager::set_plugin_enabled(&plugin_id, state) {
                             let alert = adw::AlertDialog::builder()
-                                .heading("Ошибка")
-                                .body(&format!("Не удалось изменить статус расширения: {}", e))
+                                .heading(plug_lang.tr("error"))
+                                .body(&format!("{}: {}", plug_lang.tr("ext_status_fail"), e))
                                 .build();
                             alert.add_response("ok", "OK");
                             alert.choose(&win_alert, Option::<&gio::Cancellable>::None, |_| {});
@@ -561,7 +598,8 @@ impl SettingsDialog {
                     btn_del.add_css_class("flat");
                     btn_del.add_css_class("destructive-action");
                     btn_del.set_valign(gtk::Align::Center);
-                    btn_del.set_tooltip_text(Some("Удалить расширение"));
+                    let del_tip = if plug_lang.is_en() { "Delete extension" } else { "Удалить расширение" };
+                    btn_del.set_tooltip_text(Some(del_tip));
 
                     let del_id = meta.id.clone();
                     let win_del = win.clone();
@@ -569,8 +607,8 @@ impl SettingsDialog {
                     btn_del.connect_clicked(move |_| {
                         if let Err(e) = PluginManager::delete_plugin(&del_id) {
                             let alert = adw::AlertDialog::builder()
-                                .heading("Ошибка удаления")
-                                .body(&format!("Не удалось удалить расширение: {}", e))
+                                .heading(plug_lang.tr("error"))
+                                .body(&format!("{}: {}", plug_lang.tr("ext_status_fail"), e))
                                 .build();
                             alert.add_response("ok", "OK");
                             alert.choose(&win_del, Option::<&gio::Cancellable>::None, |_| {});
@@ -584,7 +622,8 @@ impl SettingsDialog {
                             let l = PluginManager::list_plugins();
                             if l.is_empty() {
                                 let empty_row = adw::ActionRow::new();
-                                empty_row.set_title("Нет установленных расширений");
+                                empty_row.set_title(plug_lang.tr("no_installed_ext"));
+                                empty_row.set_subtitle(plug_lang.tr("no_ext_sub"));
                                 refresh_del.add(&empty_row);
                             }
                         }
@@ -603,21 +642,29 @@ impl SettingsDialog {
             let win = parent.clone();
             let rf = refresh_list.clone();
             btn_choose_plug.connect_clicked(move |_| {
+                let chooser_title = if plug_lang.is_en() {
+                    "Select NeoMir Extension Package (*.plug)"
+                } else {
+                    "Выберите пакет расширения NeoMir (*.plug)"
+                };
+                let accept_label = if plug_lang.is_en() { "Install" } else { "Установить" };
+                let cancel_label = plug_lang.tr("cancel");
+
                 let chooser = gtk::FileChooserNative::new(
-                    Some("Выберите пакет расширения NeoMir (*.plug)"),
+                    Some(chooser_title),
                     Some(&win),
                     gtk::FileChooserAction::Open,
-                    Some("Установить"),
-                    Some("Отмена"),
+                    Some(accept_label),
+                    Some(cancel_label),
                 );
 
                 let filter = gtk::FileFilter::new();
-                filter.set_name(Some("Пакеты расширений NeoMir (*.plug)"));
+                filter.set_name(Some(plug_lang.tr("filter_plug")));
                 filter.add_pattern("*.plug");
                 chooser.add_filter(&filter);
 
                 let all_filter = gtk::FileFilter::new();
-                all_filter.set_name(Some("Все файлы (*.*)"));
+                all_filter.set_name(Some(plug_lang.tr("filter_all")));
                 all_filter.add_pattern("*");
                 chooser.add_filter(&all_filter);
 
@@ -629,12 +676,14 @@ impl SettingsDialog {
                             if let Some(path) = file.path() {
                                 match PluginManager::install_plug_file(&path) {
                                     Ok(meta) => {
+                                        let alert_body = if plug_lang.is_en() {
+                                            format!("\"{}\" (version {}) successfully installed and ready.", meta.name, meta.version)
+                                        } else {
+                                            format!("«{}» (версия {}) успешно установлено и готово к работе.", meta.name, meta.version)
+                                        };
                                         let alert = adw::AlertDialog::builder()
-                                            .heading("Расширение установлено!")
-                                            .body(&format!(
-                                                "«{}» (версия {}) успешно установлено и готово к работе.",
-                                                meta.name, meta.version
-                                            ))
+                                            .heading(plug_lang.tr("ext_installed"))
+                                            .body(&alert_body)
                                             .build();
                                         alert.add_response("ok", "OK");
                                         alert.choose(&win_clone, Option::<&gio::Cancellable>::None, |_| {});
@@ -642,8 +691,8 @@ impl SettingsDialog {
                                     }
                                     Err(err) => {
                                         let alert = adw::AlertDialog::builder()
-                                            .heading("Ошибка установки")
-                                            .body(&format!("Не удалось установить расширение:\n{}", err))
+                                            .heading(plug_lang.tr("error"))
+                                            .body(&format!("{}:\n{}", plug_lang.tr("ext_install_fail"), err))
                                             .build();
                                         alert.add_response("ok", "OK");
                                         alert.choose(&win_clone, Option::<&gio::Cancellable>::None, |_| {});
@@ -654,6 +703,7 @@ impl SettingsDialog {
                     }
                     dialog.destroy();
                 });
+
                 chooser.show();
             });
         }
@@ -661,11 +711,8 @@ impl SettingsDialog {
         page_plugins.add(&list_group);
         dialog.add(&page_plugins);
 
-        // Pre-select page
         if open_extensions {
             dialog.set_visible_page(&page_plugins);
-        } else {
-            dialog.set_visible_page(&page_general);
         }
 
         dialog.present(Some(&win_parent));

@@ -257,12 +257,14 @@ pub fn prompt_shortcut_recording<F>(
     parent: &impl IsA<gtk::Window>,
     action_title: &str,
     current: &Shortcut,
+    is_en: bool,
     on_record: F,
 ) where
     F: Fn(Shortcut) + 'static,
 {
+    let dialog_title = if is_en { "Assign Shortcut" } else { "Назначение горячей клавиши" };
     let dialog = adw::Window::builder()
-        .title("Назначение горячей клавиши")
+        .title(dialog_title)
         .modal(true)
         .transient_for(parent)
         .default_width(380)
@@ -277,28 +279,44 @@ pub fn prompt_shortcut_recording<F>(
     content_box.set_margin_bottom(24);
     content_box.set_valign(gtk::Align::Center);
 
+    let prompt_text = if is_en {
+        format!("Press combination for:\n\"{}\"", action_title)
+    } else {
+        format!("Нажмите комбинацию для:\n«{}»", action_title)
+    };
     let title_lbl = gtk::Label::builder()
-        .label(&format!("Нажмите комбинацию для:\n«{}»", action_title))
+        .label(&prompt_text)
         .justify(gtk::Justification::Center)
         .css_classes(["title-3"])
         .build();
 
+    let waiting_text = if is_en {
+        format!("Waiting for keypress... (current: {})", current.to_display_string())
+    } else {
+        format!("Ожидание нажатия... (текущая: {})", current.to_display_string())
+    };
     let key_display = gtk::Label::builder()
-        .label(&format!("Ожидание нажатия... (текущая: {})", current.to_display_string()))
+        .label(&waiting_text)
         .justify(gtk::Justification::Center)
         .css_classes(["card", "title-2"])
         .margin_top(8)
         .margin_bottom(8)
         .build();
 
+    let hint_text = if is_en {
+        "Press keys on keyboard (e.g. Shift+F10)\nPress Esc to cancel"
+    } else {
+        "Нажмите клавиши на клавиатуре (например, Shift+F10)\nНажмите Esc для отмены"
+    };
     let hint_lbl = gtk::Label::builder()
-        .label("Нажмите клавиши на клавиатуре (например, Shift+F10)\nНажмите Esc для отмены")
+        .label(hint_text)
         .justify(gtk::Justification::Center)
         .css_classes(["dim-label", "caption"])
         .build();
 
+    let cancel_label = if is_en { "Cancel" } else { "Отмена" };
     let btn_cancel = gtk::Button::builder()
-        .label("Отмена")
+        .label(cancel_label)
         .halign(gtk::Align::Center)
         .build();
 

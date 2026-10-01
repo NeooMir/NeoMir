@@ -4,6 +4,29 @@ use gtk::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxMode {
+    Kumir,
+    Python,
+}
+
+impl SyntaxMode {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "python" | "py" => SyntaxMode::Python,
+            _ => SyntaxMode::Kumir,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SyntaxMode::Kumir => "kumir",
+            SyntaxMode::Python => "python",
+        }
+    }
+}
+
+
 pub struct EditorView {
     pub container: gtk::Box,
     pub text_view: gtk::TextView,
@@ -22,6 +45,7 @@ pub struct EditorView {
     tag_current_line: gtk::TextTag,
     line_tag: gtk::TextTag,
     current_highlighted_line: Rc<RefCell<Option<usize>>>,
+    pub syntax_mode: Rc<RefCell<SyntaxMode>>,
 }
 
 impl EditorView {
@@ -37,6 +61,7 @@ impl EditorView {
         // Text buffers
         let buffer = gtk::TextBuffer::new(None::<&gtk::TextTagTable>);
         let line_numbers_buffer = gtk::TextBuffer::new(None::<&gtk::TextTagTable>);
+        let syntax_mode = Rc::new(RefCell::new(SyntaxMode::Kumir));
 
         let initial_theme = ThemeId::VsCode;
 
@@ -169,6 +194,7 @@ impl EditorView {
             tag_current_line,
             line_tag: line_tag.clone(),
             current_highlighted_line,
+            syntax_mode,
         };
 
         view.apply_theme(initial_theme);
@@ -198,6 +224,7 @@ impl EditorView {
         // Re-highlight syntax
         Self::highlight_syntax(
             &self.buffer,
+            *self.syntax_mode.borrow(),
             &self.tag_keyword,
             &self.tag_robot,
             &self.tag_sensor,
@@ -235,6 +262,7 @@ impl EditorView {
         let str_tag = self.tag_string.clone();
         let cmt_tag = self.tag_comment.clone();
         let num_tag = self.tag_number.clone();
+        let syn_mode = self.syntax_mode.clone();
 
         self.buffer.connect_changed(move |buffer| {
             // Update line numbers
@@ -249,12 +277,36 @@ impl EditorView {
             gutter_buf.apply_tag(&line_tag, &start, &end);
 
             // Re-apply syntax highlighting
-            Self::highlight_syntax(buffer, &kw_tag, &rb_tag, &sn_tag, &str_tag, &cmt_tag, &num_tag);
+            let mode = *syn_mode.borrow();
+            Self::highlight_syntax(buffer, mode, &kw_tag, &rb_tag, &sn_tag, &str_tag, &cmt_tag, &num_tag);
         });
+    }
+
+    pub fn syntax_mode(&self) -> SyntaxMode {
+        *self.syntax_mode.borrow()
+    }
+
+    pub fn set_syntax_mode(&self, mode: SyntaxMode) {
+        *self.syntax_mode.borrow_mut() = mode;
+        self.rehighlight();
+    }
+
+    pub fn rehighlight(&self) {
+        Self::highlight_syntax(
+            &self.buffer,
+            *self.syntax_mode.borrow(),
+            &self.tag_keyword,
+            &self.tag_robot,
+            &self.tag_sensor,
+            &self.tag_string,
+            &self.tag_comment,
+            &self.tag_number,
+        );
     }
 
     fn highlight_syntax(
         buffer: &gtk::TextBuffer,
+        mode: SyntaxMode,
         tag_kw: &gtk::TextTag,
         tag_rb: &gtk::TextTag,
         tag_sn: &gtk::TextTag,
@@ -272,20 +324,37 @@ impl EditorView {
 
         let text = buffer.text(&start, &end, true).to_string();
 
-        let keywords = [
+        let kumir_keywords = [
             "алг", "нач", "кон", "исп", "использовать", "цел", "вещ", "лог", "сим", "лит",
             "если", "то", "иначе", "все", "всё", "нц", "кц", "пока", "раз", "для", "от", "до",
             "шаг", "вывод", "ввод", "нс", "да", "нет", "и", "или", "не", "div", "mod",
+            // English equivalents
+            "alg", "begin", "end", "use", "int", "float", "bool", "char", "string",
+            "if", "then", "else", "fi", "loop", "pool", "while", "times", "for", "from", "to",
+            "step", "output", "print", "input", "newline", "true", "false", "and", "or", "not",
+        ];
+
+        let python_keywords = [
+            "def", "class", "import", "from", "as", "return", "if", "elif", "else",
+            "while", "for", "in", "try", "except", "finally", "with", "pass", "break",
+            "continue", "lambda", "yield", "none", "true", "false", "is", "not", "and",
+            "or", "self", "async", "await", "global", "nonlocal", "del", "raise", "assert",
         ];
 
         let robot_cmds = [
             "вверх", "вниз", "влево", "вправо", "закрасить", "робот", "сброс",
+            "up", "down", "left", "right", "paint", "robot", "reset",
+            "forward", "backward", "turn_left", "turn_right", "turtle",
+            "вперед", "назад", "налево", "направо", "черепаха",
+            "pen_down", "pen_up", "tail_down", "tail_up", "step_back",
         ];
 
         let sensors = [
             "сверху_свободно", "снизу_свободно", "слева_свободно", "справа_свободно",
             "сверху_стена", "снизу_стена", "слева_стена", "справа_стена",
             "клетка_закрашена", "клетка_чистая", "температура", "радиация",
+            "free", "wall", "painted", "clean", "cell_painted", "cell_clean",
+            "print", "range", "len", "int", "str", "float", "list", "dict", "set", "bool", "input", "open",
         ];
 
         let chars: Vec<char> = text.chars().collect();
@@ -296,7 +365,11 @@ impl EditorView {
             let c = chars[i];
 
             // Comments
-            if c == '|' {
+            let is_comment = match mode {
+                SyntaxMode::Kumir => c == '|',
+                SyntaxMode::Python => c == '#' || c == '|',
+            };
+            if is_comment {
                 let start_idx = i;
                 while i < len && chars[i] != '\n' {
                     i += 1;
@@ -308,13 +381,22 @@ impl EditorView {
             }
 
             // Strings
-            if c == '"' {
+            let is_string_start = match mode {
+                SyntaxMode::Kumir => c == '"',
+                SyntaxMode::Python => c == '"' || c == '\'',
+            };
+            if is_string_start {
+                let quote = c;
                 let start_idx = i;
                 i += 1;
-                while i < len && chars[i] != '"' && chars[i] != '\n' {
-                    i += 1;
+                while i < len && chars[i] != quote && chars[i] != '\n' {
+                    if chars[i] == '\\' && i + 1 < len {
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
                 }
-                if i < len && chars[i] == '"' {
+                if i < len && chars[i] == quote {
                     i += 1;
                 }
                 let start_iter = buffer.iter_at_offset(start_idx as i32);
@@ -346,7 +428,12 @@ impl EditorView {
                 let end_char_idx = i;
 
                 let lower = word.to_lowercase();
-                let matched_tag = if keywords.contains(&lower.as_str()) {
+                let is_kw = match mode {
+                    SyntaxMode::Kumir => kumir_keywords.contains(&lower.as_str()),
+                    SyntaxMode::Python => python_keywords.contains(&lower.as_str()),
+                };
+
+                let matched_tag = if is_kw {
                     Some(tag_kw)
                 } else if robot_cmds.contains(&lower.as_str()) {
                     Some(tag_rb)

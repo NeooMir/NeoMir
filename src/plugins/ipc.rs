@@ -217,6 +217,21 @@ impl IpcServer {
                 status.set_text("Исполнитель возвращен в исходное положение.");
                 format_state(&f, "ok", None)
             }
+            "step_back" | "return_back" | "шаг_назад" | "возврат" => {
+                let mut f = field.borrow_mut();
+                let stepped = f.step_back();
+                field_view.widget.queue_draw();
+                if stepped {
+                    let msg = format!("Python: Робот возвращён назад на позицию ({}, {})", f.robot_x + 1, f.robot_y + 1);
+                    console.log_action(&msg);
+                    status.set_text(&msg);
+                } else {
+                    let msg = format!("Python: Робот уже на стартовой позиции ({}, {})", f.robot_x + 1, f.robot_y + 1);
+                    console.log_action(&msg);
+                    status.set_text(&msg);
+                }
+                format_state(&f, "ok", None)
+            }
             "get_state" | "status" => {
                 let f = field.borrow();
                 format_state(&f, "ok", None)
